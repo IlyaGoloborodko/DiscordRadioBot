@@ -1,16 +1,18 @@
 package main
 
 import (
+	"encoding/binary"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
-	_ "strings"
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
+	"layeh.com/gopus"
 )
 
 var radioURL string
@@ -42,6 +44,7 @@ func main() {
 	}
 	log.Println("Bot is up!")
 
+	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
@@ -68,7 +71,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 func joinVoice(s *discordgo.Session, m *discordgo.MessageCreate) {
 	guild, err := s.State.Guild(m.GuildID)
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "Ошибка: не нашёл гильдию")
+		s.ChannelMessageSend(m.ChannelID, "Guild not found")
 		return
 	}
 
@@ -81,47 +84,30 @@ func joinVoice(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if vcID == "" {
-		s.ChannelMessageSend(m.ChannelID, "Сначала зайди в голосовой канал")
+		s.ChannelMessageSend(m.ChannelID, "Join a voice channel first")
 		return
 	}
 
 	vc, err := s.ChannelVoiceJoin(m.GuildID, vcID, false, true)
 	if err != nil {
-		_, err := s.ChannelMessageSend(m.ChannelID, "Не получилось подключиться к голосу")
-		if err != nil {
-			return
-		}
+		s.ChannelMessageSend(m.ChannelID, "Failed to join voice channel")
 		return
 	}
 
-	speakingErr := vc.Speaking(true)
-	if speakingErr != nil {
-		return
-	}
-
-	_, chanMessSendErr := s.ChannelMessageSend(m.ChannelID, "Подключился!")
-	if chanMessSendErr != nil {
-		return
-	}
+	vc.Speaking(true)
+	s.ChannelMessageSend(m.ChannelID, "Joined voice!")
+	log.Println("Connected to voice channel:", vcID)
 }
 
 func playRadio(s *discordgo.Session, m *discordgo.MessageCreate) {
-	// Нужно уже быть в голосовом канале
 	vc, found := findVoiceConnection(s, m.GuildID)
 	if !found {
-		_, err := s.ChannelMessageSend(m.ChannelID, "Сначала !join")
-		if err != nil {
-			return
-		}
+		s.ChannelMessageSend(m.ChannelID, "First use !join")
 		return
 	}
 
 	go streamRadio(vc, radioURL)
-	_, errorSend := s.ChannelMessageSend(m.ChannelID, "Играть радио: "+radioURL)
-	if errorSend != nil {
-		return
-	}
-	return
+	s.ChannelMessageSend(m.ChannelID, "Streaming radio: "+radioURL)
 }
 
 func findVoiceConnection(s *discordgo.Session, guildID string) (*discordgo.VoiceConnection, bool) {
@@ -139,10 +125,9 @@ func streamRadio(vc *discordgo.VoiceConnection, url string) {
 		"-reconnect_streamed", "1",
 		"-reconnect_delay_max", "5",
 		"-i", url,
-		"-ac", "2",
-		"-f", "opus",
+		"-f", "s16le",
 		"-ar", "48000",
-		"-vbr", "on",
+		"-ac", "2",
 		"pipe:1",
 	)
 
@@ -152,20 +137,39 @@ func streamRadio(vc *discordgo.VoiceConnection, url string) {
 		return
 	}
 
-	err = cmd.Start()
-	if err != nil {
+	if err := cmd.Start(); err != nil {
 		log.Println("FFmpeg start error:", err)
 		return
 	}
 
-	buf := make([]byte, 1920*2*2)
+	enc, err := gopus.NewEncoder(48000, 2, gopus.Audio)
+	if err != nil {
+		log.Println("Opus encoder create error:", err)
+		return
+	}
+
+	// Buffer for 20ms PCM frames
+	pcmBuf := make([]int16, 960*2)
+
 	for {
-		n, err := stdout.Read(buf)
-		if err != nil {
+		err := binary.Read(stdout, binary.LittleEndian, pcmBuf)
+		if err == io.EOF {
 			break
 		}
-		vc.OpusSend <- buf[:n]
+		if err != nil {
+			log.Println("PCM read error:", err)
+			break
+		}
+
+		opusFrame, err := enc.Encode(pcmBuf, len(pcmBuf)/2, len(pcmBuf)/2)
+		if err != nil {
+			log.Println("Opus encode error:", err)
+			break
+		}
+
+		vc.OpusSend <- opusFrame
 	}
 
 	cmd.Wait()
+	log.Println("Radio stream ended")
 }
