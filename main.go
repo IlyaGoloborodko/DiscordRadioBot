@@ -237,7 +237,8 @@ func playRadio(s *discordgo.Session, m *discordgo.MessageCreate) {
 	radioURL := stations[idx-1].StreamURL
 	vc, found := findVoiceConnection(s, m.GuildID)
 	if !found {
-		return
+		joinVoice(s, m)
+		vc, found = findVoiceConnection(s, m.GuildID)
 	}
 
 	// отправляем сигнал предыдущему потоку, если есть
