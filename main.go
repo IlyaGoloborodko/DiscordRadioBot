@@ -2,27 +2,111 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log"
+	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
 	"layeh.com/gopus"
 )
 
-var radioURL string
+var allStreamURLs []string
+
+var stopStreamChan = make(chan struct{})
+
+func loadAllStreamURLs() error {
+	stations, err := getAvailableRadios()
+	if err != nil {
+		return err
+	}
+
+	// Очищаем прошлые значения
+	allStreamURLs = make([]string, 0, len(stations))
+
+	// Наполняем только `url_resolved`
+	for _, st := range stations {
+		if st.StreamURL != "" {
+			allStreamURLs = append(allStreamURLs, st.StreamURL)
+		}
+	}
+	return nil
+}
 
 func init() {
+	//godotenv.Load()
+	//radioURL = os.Getenv("RADIO_URL")
+	//if radioURL == "" {
+	//	log.Fatal("RADIO_URL not set")
+	//}
 	godotenv.Load()
-	radioURL = os.Getenv("RADIO_URL")
-	if radioURL == "" {
-		log.Fatal("RADIO_URL not set")
+	if err := loadAllStreamURLs(); err != nil {
+		log.Printf("failed to load station URLs: %v", err)
+	} else {
+		log.Printf("loaded %d stream URLs", len(allStreamURLs))
 	}
+}
+
+type Mirror struct {
+	URL string `json:"name"`
+}
+
+func getAvailableMirror() (string, error) {
+	resp, err := http.Get("https://all.api.radio-browser.info/json/servers")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var mirrors []Mirror
+
+	if err := json.NewDecoder(resp.Body).Decode(&mirrors); err != nil {
+		return "", err
+	}
+
+	if len(mirrors) == 0 {
+		return "", fmt.Errorf("no mirrors found")
+	}
+
+	return mirrors[0].URL, nil
+}
+
+type RadioStation struct {
+	Name      string `json:"name"`
+	StreamURL string `json:"url_resolved"`
+	Homepage  string `json:"homepage,omitempty"`
+	Country   string `json:"country,omitempty"`
+	Tags      string `json:"tags,omitempty"`
+	Bitrate   int    `json:"bitrate,omitempty"`
+}
+
+func getAvailableRadios() ([]RadioStation, error) {
+	mirror, err := getAvailableMirror()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stations: %w", err)
+	}
+	resp, err := http.Get(fmt.Sprintf("https://%s/json/stations", mirror))
+	//resp, err := http.Get(mirror)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stations: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var stations []RadioStation
+
+	if err := json.NewDecoder(resp.Body).Decode(&stations); err != nil {
+		return nil, fmt.Errorf("failed to decode stations JSON: %w", err)
+	}
+	return stations, nil
 }
 
 func main() {
@@ -66,12 +150,20 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if strings.HasPrefix(content, "!play") {
 		playRadio(s, m)
 	}
+
+	if strings.HasPrefix(content, "!stop") {
+		stopRadio(s, m)
+	}
+
+	if strings.HasPrefix(content, "!disconnect") {
+		disconnectChannel(s, m)
+	}
 }
 
 func joinVoice(s *discordgo.Session, m *discordgo.MessageCreate) {
 	guild, err := s.State.Guild(m.GuildID)
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "Guild not found")
+		//s.ChannelMessageSend(m.ChannelID, "Guild not found")
 		return
 	}
 
@@ -84,27 +176,34 @@ func joinVoice(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if vcID == "" {
-		s.ChannelMessageSend(m.ChannelID, "Join a voice channel first")
+		//s.ChannelMessageSend(m.ChannelID, "Join a voice channel first")
 		return
 	}
 
 	vc, err := s.ChannelVoiceJoin(m.GuildID, vcID, false, true)
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, "Failed to join voice channel")
+		//s.ChannelMessageSend(m.ChannelID, "Failed to join voice channel")
 		return
 	}
 
 	vc.Speaking(true)
-	s.ChannelMessageSend(m.ChannelID, "Joined voice!")
+	//s.ChannelMessageSend(m.ChannelID, "Joined voice!")
 	log.Println("Connected to voice channel:", vcID)
 }
 
 func playRadio(s *discordgo.Session, m *discordgo.MessageCreate) {
 	vc, found := findVoiceConnection(s, m.GuildID)
 	if !found {
-		s.ChannelMessageSend(m.ChannelID, "First use !join")
+		//s.ChannelMessageSend(m.ChannelID, "First use !join")
 		return
 	}
+	rand.Seed(time.Now().UnixNano())
+	if len(allStreamURLs) == 0 {
+		fmt.Println("Нет доступных потоков")
+		return
+	}
+	idx := rand.Intn(len(allStreamURLs))
+	radioURL := allStreamURLs[idx]
 
 	go streamRadio(vc, radioURL)
 	s.ChannelMessageSend(m.ChannelID, "Streaming radio: "+radioURL)
@@ -172,4 +271,31 @@ func streamRadio(vc *discordgo.VoiceConnection, url string) {
 
 	cmd.Wait()
 	log.Println("Radio stream ended")
+}
+
+func stopRadio(s *discordgo.Session, m *discordgo.MessageCreate) {
+	vc, found := findVoiceConnection(s, m.GuildID)
+	if !found {
+		//s.ChannelMessageSend(m.ChannelID, "Я не в голосовом канале.")
+		return
+	}
+
+	// Останавливаем передачу аудио
+	// Оповещаем Discord, что бот больше не говорит
+	vc.Speaking(false)
+
+}
+
+func disconnectChannel(s *discordgo.Session, m *discordgo.MessageCreate) {
+	vc, found := findVoiceConnection(s, m.GuildID)
+	if !found {
+		//s.ChannelMessageSend(m.ChannelID, "Я не в голосовом канале.")
+		return
+	}
+	// Закрываем голосовое соединение
+	err := vc.Disconnect()
+	if err != nil {
+		//s.ChannelMessageSend(m.ChannelID, "Ошибка при отключении: "+err.Error())
+		return
+	}
 }
