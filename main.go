@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -35,7 +34,6 @@ func main() {
 		log.Fatal("error creating Discord session,", err)
 	}
 
-	// Обработчик команд
 	dg.AddHandler(messageCreate)
 
 	err = dg.Open()
@@ -44,7 +42,6 @@ func main() {
 	}
 	log.Println("Bot is up!")
 
-	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
@@ -75,7 +72,6 @@ func joinVoice(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	// Находим голосовой канал пользователя
 	var vcID string
 	for _, vs := range guild.VoiceStates {
 		if vs.UserID == m.Author.ID {
@@ -120,7 +116,6 @@ func playRadio(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	// Стримим радио через ffmpeg
 	go streamRadio(vc, radioURL)
 	_, errorSend := s.ChannelMessageSend(m.ChannelID, "Играть радио: "+radioURL)
 	if errorSend != nil {
@@ -139,23 +134,37 @@ func findVoiceConnection(s *discordgo.Session, guildID string) (*discordgo.Voice
 }
 
 func streamRadio(vc *discordgo.VoiceConnection, url string) {
-	// FFmpeg: берем поток и конвертируем в opus
-	cmd := exec.Command("ffmpeg", "-i", url,
-		"-f", "opus", "-ar", "48000", "-ac", "2", "pipe:1")
+	cmd := exec.Command("ffmpeg",
+		"-reconnect", "1",
+		"-reconnect_streamed", "1",
+		"-reconnect_delay_max", "5",
+		"-i", url,
+		"-ac", "2",
+		"-f", "opus",
+		"-ar", "48000",
+		"-vbr", "on",
+		"pipe:1",
+	)
 
-	stdout, _ := cmd.StdoutPipe()
-	err := cmd.Start()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		log.Println("FFmpeg stdout error:", err)
 		return
 	}
 
-	opusBuf := make([]byte, 3840) // buffer frame
+	err = cmd.Start()
+	if err != nil {
+		log.Println("FFmpeg start error:", err)
+		return
+	}
+
+	buf := make([]byte, 1920*2*2)
 	for {
-		n, err := stdout.Read(opusBuf)
-		if err == io.EOF || err != nil {
+		n, err := stdout.Read(buf)
+		if err != nil {
 			break
 		}
-		vc.OpusSend <- opusBuf[:n]
+		vc.OpusSend <- buf[:n]
 	}
 
 	cmd.Wait()
