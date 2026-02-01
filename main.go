@@ -180,13 +180,13 @@ func joinVoice(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	vc, err := s.ChannelVoiceJoin(m.GuildID, vcID, false, true)
-	if err != nil {
-		//s.ChannelMessageSend(m.ChannelID, "Failed to join voice channel")
-		return
-	}
+	s.ChannelVoiceJoin(m.GuildID, vcID, false, true)
+	//if err != nil {
+	//	//s.ChannelMessageSend(m.ChannelID, "Failed to join voice channel")
+	//	return
+	//}
 
-	vc.Speaking(true)
+	//vc.Speaking(true)
 	//s.ChannelMessageSend(m.ChannelID, "Joined voice!")
 	log.Println("Connected to voice channel:", vcID)
 }
@@ -205,7 +205,13 @@ func playRadio(s *discordgo.Session, m *discordgo.MessageCreate) {
 	idx := rand.Intn(len(allStreamURLs))
 	radioURL := allStreamURLs[idx]
 
+	select {
+	case stopStreamChan <- struct{}{}:
+	default:
+	}
+
 	go streamRadio(vc, radioURL)
+	vc.Speaking(true)
 	s.ChannelMessageSend(m.ChannelID, "Streaming radio: "+radioURL)
 }
 
@@ -251,22 +257,28 @@ func streamRadio(vc *discordgo.VoiceConnection, url string) {
 	pcmBuf := make([]int16, 960*2)
 
 	for {
-		err := binary.Read(stdout, binary.LittleEndian, pcmBuf)
-		if err == io.EOF {
-			break
+		select {
+		case <-stopStreamChan:
+			// получили сигнал остановки — завершаем цикл
+			vc.Speaking(false)
+			cmd.Process.Kill() // убиваем ffmpeg
+			return
+		default:
+			// читаем PCM и отправляем в Discord
+			if err := binary.Read(stdout, binary.LittleEndian, pcmBuf); err != nil {
+				if err != io.EOF {
+					log.Println("PCM read error:", err)
+				}
+				cmd.Wait()
+				return
+			}
+			opusFrame, err := enc.Encode(pcmBuf, len(pcmBuf)/2, len(pcmBuf)/2)
+			if err != nil {
+				log.Println("Opus encode error:", err)
+				continue
+			}
+			vc.OpusSend <- opusFrame
 		}
-		if err != nil {
-			log.Println("PCM read error:", err)
-			break
-		}
-
-		opusFrame, err := enc.Encode(pcmBuf, len(pcmBuf)/2, len(pcmBuf)/2)
-		if err != nil {
-			log.Println("Opus encode error:", err)
-			break
-		}
-
-		vc.OpusSend <- opusFrame
 	}
 
 	cmd.Wait()
@@ -282,6 +294,7 @@ func stopRadio(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	// Останавливаем передачу аудио
 	// Оповещаем Discord, что бот больше не говорит
+	stopStreamChan <- struct{}{}
 	vc.Speaking(false)
 
 }
