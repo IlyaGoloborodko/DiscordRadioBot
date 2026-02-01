@@ -6,37 +6,37 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	//"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
-	"time"
+	//"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
 	"layeh.com/gopus"
 )
 
-var allStreamURLs []string
+var allStations []RadioStation
 
 var stopStreamChan = make(chan struct{})
 
-func loadAllStreamURLs() error {
+func loadAllStations() error {
 	stations, err := getAvailableRadios()
 	if err != nil {
 		return err
 	}
 
 	// Очищаем прошлые значения
-	allStreamURLs = make([]string, 0, len(stations))
+	allStations = make([]RadioStation, 0, len(stations))
 
-	// Наполняем только `url_resolved`
 	for _, st := range stations {
 		if st.StreamURL != "" {
-			allStreamURLs = append(allStreamURLs, st.StreamURL)
+			allStations = append(allStations, st)
 		}
 	}
 	return nil
@@ -49,10 +49,10 @@ func init() {
 	//	log.Fatal("RADIO_URL not set")
 	//}
 	godotenv.Load()
-	if err := loadAllStreamURLs(); err != nil {
+	if err := loadAllStations(); err != nil {
 		log.Printf("failed to load station URLs: %v", err)
 	} else {
-		log.Printf("loaded %d stream URLs", len(allStreamURLs))
+		log.Printf("loaded %d stations", len(allStations))
 	}
 }
 
@@ -136,6 +136,8 @@ func main() {
 	dg.Close()
 }
 
+var recentSearch = make(map[string][]RadioStation)
+
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.Bot {
 		return
@@ -157,6 +159,32 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if strings.HasPrefix(content, "!disconnect") {
 		disconnectChannel(s, m)
+	}
+
+	if strings.HasPrefix(content, "!find ") {
+		keyword := strings.TrimSpace(strings.TrimPrefix(content, "!find "))
+		matches := searchStations(keyword)
+
+		if len(matches) == 0 {
+			s.ChannelMessageSend(m.ChannelID, "Ничего не найдено по запросу “"+keyword+"”")
+			return
+		}
+
+		// Ограничим вывод, чтобы не засорять чат
+		max := 10
+		if len(matches) < max {
+			max = len(matches)
+		}
+
+		msg := "Найденные станции:\n"
+		for i := 0; i < max; i++ {
+			st := matches[i]
+			msg += fmt.Sprintf("%d) %s — %s (%s)\n", i+1, st.Name, st.Country, st.StreamURL)
+		}
+		msg += "\nИспользуй `!play <номер>` чтобы включить станцию."
+
+		s.ChannelMessageSend(m.ChannelID, msg)
+		recentSearch[m.Author.ID] = matches[:max] // см. ниже
 	}
 }
 
@@ -192,27 +220,47 @@ func joinVoice(s *discordgo.Session, m *discordgo.MessageCreate) {
 }
 
 func playRadio(s *discordgo.Session, m *discordgo.MessageCreate) {
+	idxStr := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(m.Content), "!play "))
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, "Неверный номер")
+		return
+	}
+
+	user := m.Author.ID
+	stations, ok := recentSearch[user]
+	if !ok || idx <= 0 || idx > len(stations) {
+		s.ChannelMessageSend(m.ChannelID, "Не найдено для этого номера")
+		return
+	}
+
+	radioURL := stations[idx-1].StreamURL
 	vc, found := findVoiceConnection(s, m.GuildID)
 	if !found {
-		//s.ChannelMessageSend(m.ChannelID, "First use !join")
 		return
 	}
-	rand.Seed(time.Now().UnixNano())
-	if len(allStreamURLs) == 0 {
-		fmt.Println("Нет доступных потоков")
-		return
-	}
-	idx := rand.Intn(len(allStreamURLs))
-	radioURL := allStreamURLs[idx]
 
+	// отправляем сигнал предыдущему потоку, если есть
 	select {
 	case stopStreamChan <- struct{}{}:
 	default:
 	}
-
 	go streamRadio(vc, radioURL)
 	vc.Speaking(true)
-	s.ChannelMessageSend(m.ChannelID, "Streaming radio: "+radioURL)
+
+	s.ChannelMessageSend(m.ChannelID, "🎧 Стрим: "+stations[idx-1].Name)
+}
+
+func searchStations(term string) []RadioStation {
+	term = strings.ToLower(term)
+	res := make([]RadioStation, 0)
+	for _, st := range allStations {
+		if strings.Contains(strings.ToLower(st.Name), term) ||
+			strings.Contains(strings.ToLower(st.Country), term) {
+			res = append(res, st)
+		}
+	}
+	return res
 }
 
 func findVoiceConnection(s *discordgo.Session, guildID string) (*discordgo.VoiceConnection, bool) {
