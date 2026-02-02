@@ -11,7 +11,7 @@ import (
 func Search(s *discordgo.Session, m *discordgo.MessageCreate) error {
 	content := strings.ToLower(m.Content)
 
-	keyword := strings.TrimSpace(strings.TrimPrefix(content, "!find "))
+	keyword := strings.TrimSpace(strings.TrimPrefix(content, "!search "))
 	matches := searchStations(keyword)
 
 	if len(matches) == 0 {
