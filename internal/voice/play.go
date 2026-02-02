@@ -4,6 +4,7 @@ import (
 	"discordAudio/internal/discordUtils"
 	"discordAudio/internal/radio"
 	"discordAudio/internal/stream"
+	"log"
 	"strconv"
 	"strings"
 
@@ -44,7 +45,13 @@ func PlayRadio(s *discordgo.Session, m *discordgo.MessageCreate) error {
 	// отправляем сигнал предыдущему потоку, если есть
 	stream.StopChan()
 
-	go stream.StreamRadio(vc, radioURL)
+	go func() {
+		err := stream.StartStreaming(vc, radioURL)
+		if err != nil {
+			log.Fatalf("error playing radio: %v", err)
+		}
+
+	}()
 	err = vc.Speaking(true)
 	if err != nil {
 		return err

@@ -10,7 +10,7 @@ import (
 	"layeh.com/gopus"
 )
 
-func StreamRadio(vc *discordgo.VoiceConnection, url string) {
+func StartStreaming(vc *discordgo.VoiceConnection, url string) error {
 	cmd := exec.Command("ffmpeg",
 		"-reconnect", "1",
 		"-reconnect_streamed", "1",
@@ -24,19 +24,16 @@ func StreamRadio(vc *discordgo.VoiceConnection, url string) {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Println("FFmpeg stdout error:", err)
-		return
+		return err
 	}
 
 	if err := cmd.Start(); err != nil {
-		log.Println("FFmpeg start error:", err)
-		return
+		return err
 	}
 
 	enc, err := gopus.NewEncoder(48000, 2, gopus.Audio)
 	if err != nil {
-		log.Println("Opus encoder create error:", err)
-		return
+		return err
 	}
 
 	// Buffer for 20ms PCM frames
@@ -46,27 +43,32 @@ func StreamRadio(vc *discordgo.VoiceConnection, url string) {
 		select {
 		case <-stopStreamChan:
 			// получили сигнал остановки — завершаем цикл
-			vc.Speaking(false)
-			cmd.Process.Kill() // убиваем ffmpeg
-			return
+			err := vc.Speaking(false)
+			if err != nil {
+				return err
+			}
+			err = cmd.Process.Kill() // убиваем ffmpeg
+			if err != nil {
+				return err
+			}
+			return nil
 		default:
 			// читаем PCM и отправляем в Discord
 			if err := binary.Read(stdout, binary.LittleEndian, pcmBuf); err != nil {
 				if err != io.EOF {
 					log.Println("PCM read error:", err)
 				}
-				cmd.Wait()
-				return
+				err := cmd.Wait()
+				if err != nil {
+					return err
+				}
+				return nil
 			}
 			opusFrame, err := enc.Encode(pcmBuf, len(pcmBuf)/2, len(pcmBuf)/2)
 			if err != nil {
-				log.Println("Opus encode error:", err)
 				continue
 			}
 			vc.OpusSend <- opusFrame
 		}
 	}
-
-	cmd.Wait()
-	log.Println("Radio stream ended")
 }
