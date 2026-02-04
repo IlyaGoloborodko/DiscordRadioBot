@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"discordAudio/internal/config"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
 )
@@ -35,6 +37,7 @@ func main() {
 	if token == "" {
 		log.Fatal("DISCORD_TOKEN not set")
 	}
+	config.DebugGuildID = os.Getenv("DEBUG_GUIID")
 
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -42,6 +45,11 @@ func main() {
 	}
 
 	dg.AddHandler(discord.MessageHandler)
+
+	err = discord.RegisterCommands(dg)
+	if err != nil {
+		log.Fatal("error register Discord commands,", err)
+	}
 
 	err = dg.Open()
 	if err != nil {

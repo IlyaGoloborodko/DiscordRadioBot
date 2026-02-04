@@ -2,44 +2,26 @@ package voice
 
 import (
 	"discordAudio/internal/radio"
-	"fmt"
+	"log"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-func Search(s *discordgo.Session, m *discordgo.MessageCreate) error {
-	content := strings.ToLower(m.Content)
+func searchRadio(query string) ([]radio.Station, error) {
+	content := strings.ToLower(query)
 
 	keyword := strings.TrimSpace(strings.TrimPrefix(content, "!search "))
 	matches := searchStations(keyword)
 
 	if len(matches) == 0 {
-		_, err := s.ChannelMessageSend(m.ChannelID, "Ничего не найдено по запросу “"+keyword+"”")
-		if err != nil {
-			return err
-		}
-		return nil
+		return nil, nil
 	}
-
 	maxCount := 10
 	if len(matches) < maxCount {
 		maxCount = len(matches)
 	}
-
-	msg := "Найденные станции:\n"
-	for i := 0; i < maxCount; i++ {
-		st := matches[i]
-		msg += fmt.Sprintf("%d) %s — %s (%s)\n", i+1, st.Name, st.Country, st.StreamURL)
-	}
-	msg += "\nИспользуй `!play <номер>` чтобы включить станцию."
-
-	_, err := s.ChannelMessageSend(m.ChannelID, msg)
-	if err != nil {
-		return err
-	}
-	radio.RecentSearch[m.Author.ID] = matches[:maxCount]
-	return nil
+	return matches, nil
 }
 
 func searchStations(term string) []radio.Station {
@@ -52,4 +34,35 @@ func searchStations(term string) []radio.Station {
 		}
 	}
 	return res
+}
+func Search(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	query := i.ApplicationCommandData().Options[0].StringValue()
+
+	choices := []*discordgo.ApplicationCommandOptionChoice{}
+	foundRadios, err := searchRadio(query)
+	if err != nil {
+	}
+	for _, r := range foundRadios {
+		displayName := r.Name
+		displayName += " (" + r.Country + ")"
+		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
+			Name:  displayName,
+			Value: r.StationUUID,
+		})
+		if len(choices) >= 25 {
+			break
+		}
+	}
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionApplicationCommandAutocompleteResult, // 🔑 тип для автодополнения
+		Data: &discordgo.InteractionResponseData{
+			Choices: choices,
+		},
+	})
+	if err != nil {
+		log.Fatalf("Failed to interact interaction: %v", err)
+	}
+
+	return nil
+
 }

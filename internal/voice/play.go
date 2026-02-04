@@ -5,42 +5,110 @@ import (
 	"discordAudio/internal/radio"
 	"discordAudio/internal/stream"
 	"log"
-	"strconv"
-	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-func PlayRadio(s *discordgo.Session, m *discordgo.MessageCreate) error {
-	idxStr := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(m.Content), "!play "))
-	idx, err := strconv.Atoi(idxStr)
-	if err != nil {
-		_, err := s.ChannelMessageSend(m.ChannelID, "Неверный номер")
-		if err != nil {
-			return err
+//func PlayRadio(s *discordgo.Session, m *discordgo.MessageCreate) error {
+//	idxStr := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(m.Content), "!play "))
+//	idx, err := strconv.Atoi(idxStr)
+//	if err != nil {
+//		_, err := s.ChannelMessageSend(m.ChannelID, "Неверный номер")
+//		if err != nil {
+//			return err
+//		}
+//		return nil
+//	}
+//
+//	user := m.Author.ID
+//	stations, ok := radio.RecentSearch[user]
+//	if !ok || idx <= 0 || idx > len(stations) {
+//		_, err := s.ChannelMessageSend(m.ChannelID, "Не найдено для этого номера")
+//		if err != nil {
+//			return err
+//		}
+//		return nil
+//	}
+//
+//	radioURL := stations[idx-1].StreamURL
+//	vc, found := discordUtils.FindVoiceConnection(s, m.GuildID)
+//	if !found {
+//		err := JoinVoice(s, m)
+//		if err != nil {
+//			return err
+//		}
+//		vc, found = discordUtils.FindVoiceConnection(s, m.GuildID)
+//	}
+//
+//	// отправляем сигнал предыдущему потоку, если есть
+//	stream.StopChan()
+//
+//	go func() {
+//		err := stream.StartStreaming(vc, radioURL)
+//		if err != nil {
+//			log.Fatalf("error playing radio: %v", err)
+//		}
+//
+//	}()
+//	err = vc.Speaking(true)
+//	if err != nil {
+//		return err
+//	}
+//
+//	_, err = s.ChannelMessageSend(m.ChannelID, "🎧 Стрим: "+stations[idx-1].Name)
+//	if err != nil {
+//		return err
+//	}
+//	return nil
+//}
+
+func PlayRadio(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	selectedUUID := i.ApplicationCommandData().Options[0].StringValue()
+
+	var station *radio.Station
+	for _, st := range radio.AllStations { // allStations — твой срез всех доступных радиостанций
+		if st.StationUUID == selectedUUID {
+			station = &st
+			break
 		}
+	}
+	if station == nil {
 		return nil
 	}
 
-	user := m.Author.ID
-	stations, ok := radio.RecentSearch[user]
-	if !ok || idx <= 0 || idx > len(stations) {
-		_, err := s.ChannelMessageSend(m.ChannelID, "Не найдено для этого номера")
-		if err != nil {
-			return err
-		}
-		return nil
+	radioURL := station.StreamURL
+
+	//userID := ""
+	channelID := ""
+	guildID := ""
+
+	if i.Member != nil && i.Member.User != nil {
+		//userID = i.Member.User.ID
+		channelID = i.ChannelID
+		guildID = i.GuildID
+	} else if i.User != nil {
+		//userID = i.User.ID
+		channelID = i.ChannelID
+		guildID = i.GuildID
 	}
 
-	radioURL := stations[idx-1].StreamURL
-	vc, found := discordUtils.FindVoiceConnection(s, m.GuildID)
+	vc, found := discordUtils.FindVoiceConnection(s, guildID)
 	if !found {
-		err := JoinVoice(s, m)
-		if err != nil {
-			return err
-		}
-		vc, found = discordUtils.FindVoiceConnection(s, m.GuildID)
+		content := "Не найдено для этого номера"
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: content,
+			},
+		})
 	}
+	//if !found {
+	//	err := JoinVoice(s, i)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	vc, found = discordUtils.FindVoiceConnection(s,.GuildID)
+	//}
 
 	// отправляем сигнал предыдущему потоку, если есть
 	stream.StopChan()
@@ -52,12 +120,12 @@ func PlayRadio(s *discordgo.Session, m *discordgo.MessageCreate) error {
 		}
 
 	}()
-	err = vc.Speaking(true)
+	err := vc.Speaking(true)
 	if err != nil {
 		return err
 	}
 
-	_, err = s.ChannelMessageSend(m.ChannelID, "🎧 Стрим: "+stations[idx-1].Name)
+	_, err = s.ChannelMessageSend(channelID, "🎧 Стрим: "+station.Name+" "+station.Country)
 	if err != nil {
 		return err
 	}

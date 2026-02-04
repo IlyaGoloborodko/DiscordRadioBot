@@ -1,0 +1,83 @@
+package discord
+
+import (
+	"discordAudio/internal/config"
+	"discordAudio/internal/voice"
+	"log"
+
+	"github.com/bwmarrin/discordgo"
+)
+
+var (
+	commands = []*discordgo.ApplicationCommand{
+		{
+			Name:        "search",
+			Description: "search Radio",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Name:         "query",
+					Description:  "Type something",
+					Type:         discordgo.ApplicationCommandOptionString,
+					Required:     true,
+					Autocomplete: true,
+				},
+			},
+		},
+	}
+
+	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
+		"search": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			err := voice.PlayRadio(s, i)
+			if err != nil {
+				log.Fatal("error processing Search command,", err)
+			}
+		},
+	}
+)
+
+var serverGuiid string
+
+func RegisterCommands(s *discordgo.Session) error {
+	err := s.Open()
+	if err != nil {
+		log.Fatalf("Cannot open the session: %v", err)
+	}
+	if config.Debug {
+		serverGuiid = config.DebugGuildID
+	} else {
+		serverGuiid = ""
+	}
+
+	RegisteredCommands = make([]*discordgo.ApplicationCommand, len(commands))
+	for i, v := range commands {
+		cmd, err := s.ApplicationCommandCreate(s.State.User.ID, serverGuiid, v)
+		if err != nil {
+			log.Panicf("Cannot create '%v' command: %v", v.Name, err)
+		}
+		RegisteredCommands[i] = cmd
+	}
+	if !config.SupportCommands {
+		for _, v := range RegisteredCommands {
+			if v == nil {
+				continue
+			}
+			err := s.ApplicationCommandDelete(s.State.User.ID, serverGuiid, v.ID)
+			if err != nil {
+				log.Panicf("Cannot delete '%v' command: %v", v.Name, err)
+			}
+		}
+	}
+	s.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		switch i.Type {
+		case discordgo.InteractionApplicationCommandAutocomplete:
+			voice.Search(s, i)
+		case discordgo.InteractionApplicationCommand:
+			if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
+				h(s, i)
+			}
+		}
+	})
+	defer s.Close()
+
+	return nil
+}

@@ -23,13 +23,13 @@ func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if strings.HasPrefix(content, "!play") {
-		err := voice.PlayRadio(s, m)
-		if err != nil {
-			log.Fatalf("error playing radio: %v", err)
-		}
-		return
-	}
+	//if strings.HasPrefix(content, "!play") {
+	//	err := voice.PlayRadio(s, m)
+	//	if err != nil {
+	//		log.Fatalf("error playing radio: %v", err)
+	//	}
+	//	return
+	//}
 
 	if strings.HasPrefix(content, "!stop") {
 		err := voice.StopRadio(s, m)
@@ -46,11 +46,11 @@ func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 
-	if strings.HasPrefix(content, "!search ") {
-		err := voice.Search(s, m)
-		if err != nil {
-			log.Fatalf("error searching: %v", err)
-		}
-		return
-	}
+	//if strings.HasPrefix(content, "!search ") {
+	//	err := voice.Search(s, m)
+	//	if err != nil {
+	//		log.Fatalf("error searching: %v", err)
+	//	}
+	//	return
+	//}
 }
