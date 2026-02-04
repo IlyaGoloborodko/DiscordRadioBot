@@ -5,6 +5,7 @@ import (
 	"discordAudio/internal/radio"
 	"discordAudio/internal/stream"
 	"log"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -66,7 +67,7 @@ func PlayRadio(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	selectedUUID := i.ApplicationCommandData().Options[0].StringValue()
 
 	var station *radio.Station
-	for _, st := range radio.AllStations { // allStations — твой срез всех доступных радиостанций
+	for _, st := range radio.AllStations {
 		if st.StationUUID == selectedUUID {
 			station = &st
 			break
@@ -78,56 +79,50 @@ func PlayRadio(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 
 	radioURL := station.StreamURL
 
-	//userID := ""
-	channelID := ""
-	guildID := ""
-
-	if i.Member != nil && i.Member.User != nil {
-		//userID = i.Member.User.ID
-		channelID = i.ChannelID
-		guildID = i.GuildID
-	} else if i.User != nil {
-		//userID = i.User.ID
-		channelID = i.ChannelID
-		guildID = i.GuildID
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+	if err != nil {
+		return err
 	}
 
-	vc, found := discordUtils.FindVoiceConnection(s, guildID)
-	if !found {
-		content := "Не найдено для этого номера"
-		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: content,
-			},
-		})
-	}
-	//if !found {
-	//	err := JoinVoice(s, i)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	vc, found = discordUtils.FindVoiceConnection(s,.GuildID)
-	//}
-
-	// отправляем сигнал предыдущему потоку, если есть
-	stream.StopChan()
-
-	go func() {
-		err := stream.StartStreaming(vc, radioURL)
+	// Пытаемся найти существующее соединение
+	vc, found := discordUtils.FindVoiceConnection(s, i.GuildID)
+	if !found || vc == nil {
+		// Если нет — подключаемся
+		vc, err = JoinVoice(s, i)
 		if err != nil {
-			log.Fatalf("error playing radio: %v", err)
+			// Тут можно ответить пользователю
+			_, _ = s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+				Content: "Сначала зайди в голосовой канал!",
+			})
+			return nil
 		}
 
-	}()
-	err := vc.Speaking(true)
-	if err != nil {
-		return err
+		// Ждём, чтобы соединение реально установилось
+		time.Sleep(time.Second)
 	}
 
-	_, err = s.ChannelMessageSend(channelID, "🎧 Стрим: "+station.Name+" "+station.Country)
-	if err != nil {
-		return err
+	time.Sleep(250 * time.Millisecond)
+
+	// Останавливаем предыдущий стрим (если был)
+	stream.StopChan()
+
+	// Запускаем стрим в отдельной горутине
+	go func() {
+		if err := stream.StartStreaming(vc, radioURL); err != nil {
+			log.Println("Error streaming:", err)
+		}
+	}()
+
+	// Включаем speaking
+	if err := vc.Speaking(true); err != nil {
+		log.Println("Error setting speaking:", err)
 	}
-	return nil
+
+	// Отправляем сообщение пользователю
+	_, err = s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+		Content: "🎧 Стрим: " + station.Name + " " + station.Country,
+	})
+	return err
 }

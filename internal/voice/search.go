@@ -44,7 +44,18 @@ func Search(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	}
 	for _, r := range foundRadios {
 		displayName := r.Name
-		displayName += " (" + r.Country + ")"
+		if r.Country != "" {
+			displayName += " (" + r.Country + ")"
+		}
+
+		if len(displayName) > 100 {
+			displayName = displayName[:100]
+		}
+
+		if len(displayName) == 0 {
+			displayName = "Unknown Station"
+		}
+
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
 			Name:  displayName,
 			Value: r.StationUUID,

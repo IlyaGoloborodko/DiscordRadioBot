@@ -15,13 +15,13 @@ func MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	content := strings.ToLower(m.Content)
 
-	if strings.HasPrefix(content, "!join") {
-		err := voice.JoinVoice(s, m)
-		if err != nil {
-			log.Fatalf("error joining voice channel: %v", err)
-		}
-		return
-	}
+	//if strings.HasPrefix(content, "!join") {
+	//	err := voice.JoinVoice(s, m)
+	//	if err != nil {
+	//		log.Fatalf("error joining voice channel: %v", err)
+	//	}
+	//	return
+	//}
 
 	//if strings.HasPrefix(content, "!play") {
 	//	err := voice.PlayRadio(s, m)

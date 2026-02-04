@@ -4,27 +4,28 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func JoinVoice(s *discordgo.Session, m *discordgo.MessageCreate) error {
-	guild, err := s.State.Guild(m.GuildID)
+func JoinVoice(s *discordgo.Session, i *discordgo.InteractionCreate) (*discordgo.VoiceConnection, error) {
+	guild, err := s.State.Guild(i.GuildID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var vcID string
+	userID := i.Member.User.ID
 	for _, vs := range guild.VoiceStates {
-		if vs.UserID == m.Author.ID {
+		if vs.UserID == userID {
 			vcID = vs.ChannelID
 			break
 		}
 	}
 
 	if vcID == "" {
-		return nil
+		return nil, nil
 	}
 
-	_, err = s.ChannelVoiceJoin(m.GuildID, vcID, false, true)
+	vc, err := s.ChannelVoiceJoin(i.GuildID, vcID, false, true)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return vc, nil
 }
