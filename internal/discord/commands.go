@@ -38,10 +38,6 @@ var (
 var serverGuiid string
 
 func RegisterCommands(s *discordgo.Session) error {
-	err := s.Open()
-	if err != nil {
-		log.Fatalf("Cannot open the session: %v", err)
-	}
 	if config.Debug {
 		serverGuiid = config.DebugGuildID
 	} else {
@@ -68,16 +64,18 @@ func RegisterCommands(s *discordgo.Session) error {
 		}
 	}
 	s.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		switch i.Type {
-		case discordgo.InteractionApplicationCommandAutocomplete:
-			voice.Search(s, i)
-		case discordgo.InteractionApplicationCommand:
-			if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
-				h(s, i)
+		// Запускаем обработку каждой команды в отдельной горутине
+		go func() {
+			switch i.Type {
+			case discordgo.InteractionApplicationCommandAutocomplete:
+				voice.Search(s, i)
+			case discordgo.InteractionApplicationCommand:
+				if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
+					h(s, i)
+				}
 			}
-		}
+		}()
 	})
-	defer s.Close()
 
 	return nil
 }

@@ -44,12 +44,9 @@ func main() {
 		log.Fatal("error creating Discord session,", err)
 	}
 
-	dg.AddHandler(discord.MessageHandler)
+	dg.Identify.Intents = discordgo.IntentsGuildVoiceStates | discordgo.IntentsGuilds
 
-	err = discord.RegisterCommands(dg)
-	if err != nil {
-		log.Fatal("error register Discord commands,", err)
-	}
+	dg.AddHandler(discord.MessageHandler)
 
 	err = dg.Open()
 	if err != nil {
@@ -57,7 +54,11 @@ func main() {
 	}
 	log.Println("Bot is up!")
 
-	// Graceful shutdown
+	err = discord.RegisterCommands(dg)
+	if err != nil {
+		log.Fatal("error register Discord commands,", err)
+	}
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
