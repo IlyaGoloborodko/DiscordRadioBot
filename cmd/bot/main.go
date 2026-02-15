@@ -46,7 +46,7 @@ func main() {
 
 	dg.Identify.Intents = discordgo.IntentsGuildVoiceStates | discordgo.IntentsGuilds
 
-	dg.AddHandler(discord.MessageHandler)
+	//dg.AddHandler(discord.MessageHandler)
 
 	err = dg.Open()
 	if err != nil {

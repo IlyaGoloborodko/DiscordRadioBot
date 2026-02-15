@@ -6,12 +6,11 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func DisconnectChannel(s *discordgo.Session, m *discordgo.MessageCreate) error {
-	vc, found := discordUtils.FindVoiceConnection(s, m.GuildID)
+func DisconnectChannel(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	vc, found := discordUtils.FindVoiceConnection(s, i.GuildID)
 	if !found {
 		return nil
 	}
-	// Закрываем голосовое соединение
 	err := vc.Disconnect()
 	if err != nil {
 		return err

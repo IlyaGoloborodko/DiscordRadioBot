@@ -11,8 +11,8 @@ import (
 var (
 	commands = []*discordgo.ApplicationCommand{
 		{
-			Name:        "search",
-			Description: "search Radio",
+			Name:        "play",
+			Description: "play Radio",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Name:         "query",
@@ -23,13 +23,23 @@ var (
 				},
 			},
 		},
+		{
+			Name:        "stop",
+			Description: "Stop playing",
+		},
 	}
 
 	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
-		"search": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		"play": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			err := voice.PlayRadio(s, i)
 			if err != nil {
-				log.Fatal("error processing Search command,", err)
+				log.Fatal("error processing Play command,", err)
+			}
+		},
+		"stop": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			err := voice.StopRadio(s, i)
+			if err != nil {
+				log.Fatal("error processing Stop command,", err)
 			}
 		},
 	}

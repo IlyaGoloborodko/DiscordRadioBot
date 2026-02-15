@@ -7,18 +7,35 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func StopRadio(s *discordgo.Session, m *discordgo.MessageCreate) error {
-	vc, found := discordUtils.FindVoiceConnection(s, m.GuildID)
-	if !found {
-		return nil
+func StopRadio(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	vc, found := discordUtils.FindVoiceConnection(s, i.GuildID)
+	// Если бота нет в канале, всё равно нужно ответить Дискорду, чтобы не было ошибки
+	if !found || vc == nil {
+		return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: "Я сейчас не в голосе.",
+			},
+		})
 	}
 
-	// Останавливаем передачу аудио
-	// Оповещаем Discord, что бот больше не говорит
 	stream.StopCurrentStream()
 	err := vc.Speaking(false)
 	if err != nil {
 		return err
 	}
+
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Content: "⏹️ Радио остановлено.",
+		},
+	})
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
